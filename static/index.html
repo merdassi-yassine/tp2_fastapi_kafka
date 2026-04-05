@@ -1,0 +1,967 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>MicroGrid — Architecture Microservices</title>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet"/>
+  <style>
+    :root {
+      --bg:        #04060f;
+      --surface:   #080d1a;
+      --border:    #0f1f3d;
+      --accent:    #00ffe0;
+      --accent2:   #ff3cac;
+      --accent3:   #ffd700;
+      --text:      #c8d8f0;
+      --muted:     #3a4f70;
+      --success:   #00ff88;
+      --error:     #ff4566;
+      --kafka:     #ff6b35;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Syne', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Animated grid background ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(0,255,224,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,255,224,0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Glow orbs ── */
+    .orb {
+      position: fixed;
+      border-radius: 50%;
+      filter: blur(120px);
+      opacity: 0.12;
+      pointer-events: none;
+      z-index: 0;
+    }
+    .orb-1 { width: 600px; height: 600px; background: var(--accent); top: -200px; left: -200px; animation: drift 12s ease-in-out infinite alternate; }
+    .orb-2 { width: 400px; height: 400px; background: var(--accent2); bottom: -100px; right: -100px; animation: drift 15s ease-in-out infinite alternate-reverse; }
+    @keyframes drift { from { transform: translate(0,0); } to { transform: translate(60px, 40px); } }
+
+    /* ── Layout ── */
+    .wrapper {
+      position: relative;
+      z-index: 1;
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem 4rem;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 3rem;
+      padding-bottom: 1.5rem;
+      border-bottom: 1px solid var(--border);
+      animation: fadeDown 0.6s ease both;
+    }
+
+    .logo-block .logo {
+      font-size: 2rem;
+      font-weight: 800;
+      letter-spacing: -1px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .logo-block .tagline {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.72rem;
+      color: var(--muted);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-top: 4px;
+    }
+
+    .status-cluster {
+      display: flex;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .status-pill {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0.3rem 0.75rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      font-family: 'Space Mono', monospace;
+      font-size: 0.7rem;
+      color: var(--muted);
+      transition: all 0.3s;
+    }
+
+    .status-pill.online { border-color: rgba(0,255,136,0.3); color: var(--success); }
+    .status-pill.online .dot { background: var(--success); box-shadow: 0 0 6px var(--success); }
+
+    .dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--muted);
+      animation: pulse 2s ease infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    /* ── Architecture diagram ── */
+    .arch-diagram {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+      flex-wrap: wrap;
+      animation: fadeUp 0.6s 0.1s ease both;
+      overflow: hidden;
+    }
+
+    .arch-node {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      padding: 0.75rem 1rem;
+    }
+
+    .arch-icon {
+      width: 42px; height: 42px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.2rem;
+      border: 1px solid;
+      transition: transform 0.2s;
+    }
+    .arch-icon:hover { transform: scale(1.1); }
+
+    .arch-icon.frontend  { background: rgba(0,255,224,0.08); border-color: rgba(0,255,224,0.3); }
+    .arch-icon.gateway   { background: rgba(255,215,0,0.08); border-color: rgba(255,215,0,0.3); }
+    .arch-icon.users     { background: rgba(0,136,255,0.08); border-color: rgba(0,136,255,0.3); }
+    .arch-icon.kafka     { background: rgba(255,107,53,0.08); border-color: rgba(255,107,53,0.3); }
+    .arch-icon.products  { background: rgba(0,255,136,0.08); border-color: rgba(0,255,136,0.3); }
+
+    .arch-label {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.6rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      text-align: center;
+    }
+
+    .arch-port {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.58rem;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: var(--border);
+      color: var(--accent);
+    }
+
+    .arch-arrow {
+      display: flex;
+      align-items: center;
+      padding: 0 0.25rem;
+      color: var(--muted);
+      font-size: 0.7rem;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .arrow-line {
+      width: 30px;
+      height: 1px;
+      position: relative;
+      overflow: visible;
+    }
+
+    .arrow-line::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%;
+      height: 1px;
+      background: linear-gradient(90deg, var(--muted), var(--accent));
+    }
+
+    .arrow-label {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.5rem;
+      color: var(--kafka);
+      letter-spacing: 0.5px;
+    }
+
+    /* ── Search section ── */
+    .search-section {
+      animation: fadeUp 0.6s 0.2s ease both;
+      margin-bottom: 2rem;
+    }
+
+    .search-label {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: var(--muted);
+      margin-bottom: 0.75rem;
+    }
+
+    .search-row {
+      display: flex;
+      gap: 0.75rem;
+    }
+
+    .input-wrap {
+      flex: 1;
+      position: relative;
+    }
+
+    .input-wrap::before {
+      content: '#';
+      position: absolute;
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-family: 'Space Mono', monospace;
+      font-size: 1rem;
+      color: var(--accent);
+      pointer-events: none;
+    }
+
+    input[type="number"] {
+      width: 100%;
+      padding: 0.85rem 1rem 0.85rem 2.2rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      font-family: 'Space Mono', monospace;
+      font-size: 1rem;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      -moz-appearance: textfield;
+    }
+    input[type="number"]::-webkit-inner-spin-button { display: none; }
+    input[type="number"]:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(0,255,224,0.08);
+    }
+
+    .btn-search {
+      padding: 0.85rem 2rem;
+      background: linear-gradient(135deg, var(--accent), #00b8a0);
+      border: none;
+      border-radius: 10px;
+      color: #04060f;
+      font-family: 'Syne', sans-serif;
+      font-weight: 800;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      letter-spacing: 0.5px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .btn-search::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: white;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+
+    .btn-search:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(0,255,224,0.25); }
+    .btn-search:active { transform: translateY(0); }
+    .btn-search:disabled { background: var(--border); color: var(--muted); cursor: not-allowed; transform: none; box-shadow: none; }
+
+    /* ── Kafka flow indicator ── */
+    .kafka-flow {
+      display: none;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 1rem;
+      padding: 0.6rem 1rem;
+      background: rgba(255,107,53,0.06);
+      border: 1px solid rgba(255,107,53,0.2);
+      border-radius: 8px;
+      font-family: 'Space Mono', monospace;
+      font-size: 0.72rem;
+      color: var(--kafka);
+      animation: fadeIn 0.3s ease;
+    }
+
+    .kafka-flow.active { display: flex; }
+
+    .kafka-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--kafka);
+      animation: kafkaPulse 0.8s ease infinite;
+    }
+
+    @keyframes kafkaPulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.5); opacity: 0.6; }
+    }
+
+    .kafka-steps { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+    .kafka-step { opacity: 0.3; transition: opacity 0.3s; }
+    .kafka-step.active { opacity: 1; }
+    .kafka-sep { color: var(--muted); }
+
+    /* ── Results grid ── */
+    .results-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.25rem;
+      animation: fadeUp 0.6s 0.3s ease both;
+    }
+
+    @media (max-width: 600px) { .results-grid { grid-template-columns: 1fr; } }
+
+    .result-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+      transition: border-color 0.3s;
+    }
+
+    .result-card:hover { border-color: rgba(0,255,224,0.2); }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .card-title {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+
+    .card-title .icon { font-size: 1rem; }
+
+    .card-badge {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.6rem;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 400;
+    }
+
+    .badge-users   { background: rgba(0,136,255,0.12); color: #4da6ff; border: 1px solid rgba(0,136,255,0.2); }
+    .badge-products{ background: rgba(0,255,136,0.12); color: var(--success); border: 1px solid rgba(0,255,136,0.2); }
+
+    .card-body { padding: 1.25rem; min-height: 180px; }
+
+    /* ── User profile card ── */
+    .user-profile {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .user-avatar {
+      width: 52px; height: 52px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, rgba(0,136,255,0.3), rgba(0,255,224,0.2));
+      border: 1px solid rgba(0,136,255,0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.4rem;
+    }
+
+    .user-info { display: flex; flex-direction: column; gap: 0.5rem; }
+
+    .user-name {
+      font-size: 1.2rem;
+      font-weight: 800;
+      color: white;
+    }
+
+    .user-field {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .field-key {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.62rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      min-width: 36px;
+    }
+
+    .field-val {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.78rem;
+      color: var(--text);
+    }
+
+    .field-val.accent { color: var(--accent); }
+
+    /* ── Products list ── */
+    .products-list { display: flex; flex-direction: column; gap: 0.6rem; }
+
+    .product-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.65rem 0.9rem;
+      background: rgba(0,255,136,0.04);
+      border: 1px solid rgba(0,255,136,0.1);
+      border-radius: 8px;
+      transition: all 0.2s;
+      animation: slideIn 0.3s ease both;
+    }
+
+    .product-item:hover {
+      background: rgba(0,255,136,0.08);
+      border-color: rgba(0,255,136,0.2);
+      transform: translateX(3px);
+    }
+
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(-10px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+
+    .product-info { display: flex; align-items: center; gap: 0.6rem; }
+
+    .product-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--success);
+      box-shadow: 0 0 6px var(--success);
+    }
+
+    .product-name {
+      font-weight: 600;
+      font-size: 0.88rem;
+      color: white;
+    }
+
+    .product-id {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.6rem;
+      color: var(--muted);
+    }
+
+    .product-price {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.82rem;
+      color: var(--accent3);
+      font-weight: 700;
+    }
+
+    /* ── Empty / loading states ── */
+    .state-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 140px;
+      gap: 0.6rem;
+      color: var(--muted);
+    }
+
+    .state-empty .icon { font-size: 2rem; opacity: 0.4; }
+    .state-empty p { font-family: 'Space Mono', monospace; font-size: 0.72rem; text-align: center; }
+
+    .state-loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 140px;
+      gap: 1rem;
+    }
+
+    .spinner {
+      width: 32px; height: 32px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .loading-text {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.68rem;
+      color: var(--muted);
+    }
+
+    .state-error {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 140px;
+      gap: 0.5rem;
+      color: var(--error);
+    }
+
+    .state-error .icon { font-size: 1.8rem; }
+    .state-error p { font-family: 'Space Mono', monospace; font-size: 0.7rem; text-align: center; }
+
+    /* ── Log terminal ── */
+    .log-section {
+      margin-top: 1.5rem;
+      animation: fadeUp 0.6s 0.4s ease both;
+    }
+
+    .log-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 0.6rem;
+    }
+
+    .log-title {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: var(--muted);
+    }
+
+    .btn-clear {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.6rem;
+      color: var(--muted);
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-clear:hover { color: var(--error); border-color: var(--error); }
+
+    .log-terminal {
+      background: #020408;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem;
+      height: 130px;
+      overflow-y: auto;
+      font-family: 'Space Mono', monospace;
+      font-size: 0.7rem;
+      line-height: 1.8;
+    }
+
+    .log-terminal::-webkit-scrollbar { width: 4px; }
+    .log-terminal::-webkit-scrollbar-track { background: transparent; }
+    .log-terminal::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .log-line { display: flex; gap: 0.75rem; }
+    .log-time { color: var(--muted); flex-shrink: 0; }
+    .log-msg.info    { color: var(--accent); }
+    .log-msg.success { color: var(--success); }
+    .log-msg.warn    { color: var(--kafka); }
+    .log-msg.error   { color: var(--error); }
+
+    /* ── Animations ── */
+    @keyframes fadeDown {
+      from { opacity: 0; transform: translateY(-16px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(16px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to   { opacity: 1; }
+    }
+
+    /* ── Footer ── */
+    footer {
+      margin-top: 3rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: gap;
+      animation: fadeUp 0.6s 0.5s ease both;
+    }
+
+    .footer-tech {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .tech-tag {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.6rem;
+      padding: 3px 8px;
+      border-radius: 4px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }
+
+    .footer-copy {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.6rem;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+
+  <div class="wrapper">
+
+    <!-- Header -->
+    <header>
+      <div class="logo-block">
+        <div class="logo">MicroGrid</div>
+        <div class="tagline">TP2 · Architecture Microservices · FastAPI + Kafka</div>
+      </div>
+      <div class="status-cluster">
+        <div class="status-pill online" id="pill-gateway"><span class="dot"></span>Gateway :8002</div>
+        <div class="status-pill online" id="pill-users"><span class="dot"></span>Users :8000</div>
+        <div class="status-pill online" id="pill-kafka"><span class="dot"></span>Kafka :9092</div>
+        <div class="status-pill online" id="pill-products"><span class="dot"></span>Products</div>
+      </div>
+    </header>
+
+    <!-- Architecture diagram -->
+    <div class="arch-diagram">
+      <div class="arch-node">
+        <div class="arch-icon frontend">🖥️</div>
+        <div class="arch-label">Frontend</div>
+        <div class="arch-port">:8002</div>
+      </div>
+      <div class="arch-arrow">
+        <div class="arrow-line"></div>
+        <div class="arrow-label">HTTP</div>
+      </div>
+      <div class="arch-node">
+        <div class="arch-icon gateway">🔀</div>
+        <div class="arch-label">Gateway</div>
+        <div class="arch-port">FastAPI</div>
+      </div>
+      <div class="arch-arrow">
+        <div class="arrow-line"></div>
+        <div class="arrow-label">HTTP</div>
+      </div>
+      <div class="arch-node">
+        <div class="arch-icon users">👤</div>
+        <div class="arch-label">Users Svc</div>
+        <div class="arch-port">:8000</div>
+      </div>
+      <div class="arch-arrow">
+        <div class="arrow-line"></div>
+        <div class="arrow-label" style="color:var(--kafka)">KAFKA</div>
+      </div>
+      <div class="arch-node">
+        <div class="arch-icon kafka">⚡</div>
+        <div class="arch-label">Kafka Broker</div>
+        <div class="arch-port">:9092</div>
+      </div>
+      <div class="arch-arrow">
+        <div class="arrow-line"></div>
+        <div class="arrow-label" style="color:var(--kafka)">KAFKA</div>
+      </div>
+      <div class="arch-node">
+        <div class="arch-icon products">📦</div>
+        <div class="arch-label">Products Svc</div>
+        <div class="arch-port">Worker</div>
+      </div>
+    </div>
+
+    <!-- Search -->
+    <div class="search-section">
+      <div class="search-label">// Requête utilisateur</div>
+      <div class="search-row">
+        <div class="input-wrap">
+          <input type="number" id="userId" value="1" min="1" max="10" placeholder="user_id" />
+        </div>
+        <button class="btn-search" id="btn" onclick="loadData()">Exécuter</button>
+      </div>
+      <div class="kafka-flow" id="kafkaFlow">
+        <div class="kafka-dot"></div>
+        <div class="kafka-steps">
+          <span class="kafka-step" id="ks1">Gateway</span>
+          <span class="kafka-sep">→</span>
+          <span class="kafka-step" id="ks2">Users Svc</span>
+          <span class="kafka-sep">→</span>
+          <span class="kafka-step" id="ks3">user_requests</span>
+          <span class="kafka-sep">→</span>
+          <span class="kafka-step" id="ks4">Products Svc</span>
+          <span class="kafka-sep">→</span>
+          <span class="kafka-step" id="ks5">product_responses</span>
+          <span class="kafka-sep">→</span>
+          <span class="kafka-step" id="ks6">Réponse ✓</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div class="results-grid">
+      <div class="result-card" id="card-users">
+        <div class="card-header">
+          <div class="card-title">
+            <span class="icon">👤</span>
+            <span>Utilisateur</span>
+          </div>
+          <span class="card-badge badge-users">users_service · :8000</span>
+        </div>
+        <div class="card-body" id="body-users">
+          <div class="state-empty">
+            <div class="icon">◌</div>
+            <p>Entrez un ID et<br>cliquez Exécuter</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="result-card" id="card-products">
+        <div class="card-header">
+          <div class="card-title">
+            <span class="icon">📦</span>
+            <span>Produits</span>
+          </div>
+          <span class="card-badge badge-products">products_service · Kafka</span>
+        </div>
+        <div class="card-body" id="body-products">
+          <div class="state-empty">
+            <div class="icon">◌</div>
+            <p>En attente de<br>la réponse Kafka</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Log terminal -->
+    <div class="log-section">
+      <div class="log-header">
+        <div class="log-title">// Flux d'événements</div>
+        <button class="btn-clear" onclick="clearLogs()">clear</button>
+      </div>
+      <div class="log-terminal" id="logTerminal">
+        <div class="log-line">
+          <span class="log-time">00:00:00</span>
+          <span class="log-msg info">MicroGrid initialisé — en attente de requêtes...</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <footer>
+      <div class="footer-tech">
+        <span class="tech-tag">FastAPI</span>
+        <span class="tech-tag">Apache Kafka 4.2</span>
+        <span class="tech-tag">KRaft Mode</span>
+        <span class="tech-tag">Python 3.12</span>
+        <span class="tech-tag">Microservices</span>
+        <span class="tech-tag">Async Messaging</span>
+      </div>
+      <div class="footer-copy">TP2 · Architecture Distribuée</div>
+    </footer>
+
+  </div>
+
+  <script>
+    // ── Logging ──────────────────────────────────────────────
+    function log(msg, type = 'info') {
+      const terminal = document.getElementById('logTerminal');
+      const now = new Date();
+      const time = now.toTimeString().slice(0,8);
+      const line = document.createElement('div');
+      line.className = 'log-line';
+      line.innerHTML = `<span class="log-time">${time}</span><span class="log-msg ${type}">${msg}</span>`;
+      terminal.appendChild(line);
+      terminal.scrollTop = terminal.scrollHeight;
+    }
+
+    function clearLogs() {
+      document.getElementById('logTerminal').innerHTML = '';
+      log('Terminal effacé.', 'info');
+    }
+
+    // ── Kafka flow animation ──────────────────────────────────
+    async function animateKafkaFlow() {
+      const flow = document.getElementById('kafkaFlow');
+      flow.classList.add('active');
+      for (let i = 1; i <= 6; i++) {
+        await new Promise(r => setTimeout(r, 400));
+        document.getElementById(`ks${i}`).classList.add('active');
+      }
+    }
+
+    function resetKafkaFlow() {
+      document.getElementById('kafkaFlow').classList.remove('active');
+      for (let i = 1; i <= 6; i++) {
+        document.getElementById(`ks${i}`).classList.remove('active');
+      }
+    }
+
+    // ── Render user ───────────────────────────────────────────
+    function renderUser(data) {
+      const el = document.getElementById('body-users');
+      if (data.error) {
+        el.innerHTML = `<div class="state-error"><div class="icon">✕</div><p>${data.error}</p></div>`;
+        return;
+      }
+      el.innerHTML = `
+        <div class="user-profile">
+          <div class="user-avatar">👤</div>
+          <div class="user-info">
+            <div class="user-name">${data.name}</div>
+            <div class="user-field">
+              <span class="field-key">ID</span>
+              <span class="field-val accent">#${data.id}</span>
+            </div>
+            <div class="user-field">
+              <span class="field-key">Email</span>
+              <span class="field-val">${data.email || '—'}</span>
+            </div>
+            <div class="user-field">
+              <span class="field-key">Items</span>
+              <span class="field-val">${(data.products || []).length} produit(s)</span>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    // ── Render products ───────────────────────────────────────
+    function renderProducts(products) {
+      const el = document.getElementById('body-products');
+      if (!Array.isArray(products) || products.length === 0) {
+        el.innerHTML = `<div class="state-empty"><div class="icon">📭</div><p>Aucun produit<br>pour cet utilisateur</p></div>`;
+        return;
+      }
+      const items = products.map((p, i) => `
+        <div class="product-item" style="animation-delay:${i * 0.08}s">
+          <div class="product-info">
+            <div class="product-dot"></div>
+            <div>
+              <div class="product-name">${p.name}</div>
+              <div class="product-id">id:${p.id}</div>
+            </div>
+          </div>
+          <div class="product-price">${p.price !== undefined ? p.price.toFixed(2) + ' €' : ''}</div>
+        </div>`).join('');
+      el.innerHTML = `<div class="products-list">${items}</div>`;
+    }
+
+    // ── Loading state ─────────────────────────────────────────
+    function setLoading() {
+      const loadHtml = `<div class="state-loading"><div class="spinner"></div><div class="loading-text">Traitement via Kafka...</div></div>`;
+      document.getElementById('body-users').innerHTML = loadHtml;
+      document.getElementById('body-products').innerHTML = loadHtml;
+    }
+
+    // ── Main fetch ────────────────────────────────────────────
+    async function loadData() {
+      const userId = document.getElementById('userId').value;
+      const btn = document.getElementById('btn');
+
+      if (!userId || userId < 1) {
+        log('⚠ ID invalide.', 'warn');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = '...';
+      setLoading();
+      resetKafkaFlow();
+
+      log(`→ Requête pour user_id=${userId}`, 'info');
+      const flowPromise = animateKafkaFlow();
+
+      try {
+        const t0 = Date.now();
+        const [usersRes, productsRes] = await Promise.all([
+          fetch(`/api/users/${userId}`),
+          fetch(`/api/products/${userId}`)
+        ]);
+
+        const userData     = await usersRes.json();
+        const productsData = await productsRes.json();
+        const elapsed      = Date.now() - t0;
+
+        await flowPromise;
+
+        renderUser(userData);
+
+        // products peut venir soit de /api/products soit de userData.products
+        const products = Array.isArray(productsData)
+          ? productsData
+          : (userData.products || []);
+        renderProducts(products);
+
+        if (userData.error) {
+          log(`✕ Utilisateur non trouvé.`, 'error');
+        } else {
+          log(`✓ user:${userData.name} — ${products.length} produit(s) — ${elapsed}ms`, 'success');
+          log(`  ↳ Kafka topics: user_requests → product_responses`, 'warn');
+        }
+
+      } catch (err) {
+        document.getElementById('body-users').innerHTML    = `<div class="state-error"><div class="icon">✕</div><p>Erreur réseau</p></div>`;
+        document.getElementById('body-products').innerHTML = `<div class="state-error"><div class="icon">✕</div><p>Erreur réseau</p></div>`;
+        log(`✕ Erreur: ${err.message}`, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Exécuter';
+      }
+    }
+
+    // Enter key
+    document.getElementById('userId').addEventListener('keydown', e => {
+      if (e.key === 'Enter') loadData();
+    });
+  </script>
+</body>
+</html>

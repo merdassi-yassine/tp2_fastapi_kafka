@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+.python-version
+
+logs/
+*.log
+
+kafka_local/kafka_2.13-4.2.0/
+kafka_local/kraft-combined-logs/
+
+.DS_Store
+.codex
+.idea/
+.vscode/
